@@ -1,0 +1,58 @@
+#!/usr/bin/env php
+
+<?php
+
+use Ackintosh\Ganesha\Builder;
+use Ackintosh\Ganesha\Exception\RejectedException;
+use Ackintosh\Ganesha\GuzzleMiddleware;
+use Ackintosh\Ganesha\Storage\Adapter\Memcached as Adapter;
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\TransferStats;
+
+require __DIR__ . '/../vendor/autoload.php';
+
+$memcached = new Memcached();
+$memcached->addServer("memcached", 11211);
+$adapter = new Adapter($memcached);
+
+$ganesha = Builder::withCountStrategy()
+    ->adapter(new Ackintosh\Ganesha\Storage\Adapter\Memcached($memcached))
+    ->failureCountThreshold(1)
+    ->intervalToHalfOpen(5)
+    ->build();
+
+$handlers = HandlerStack::create();
+$handlers->push(new GuzzleMiddleware($ganesha));
+
+$client = new Client([
+    'base_uri' => 'http://demo4446522.mockable.i',
+    'handler' => $handlers,
+]);
+
+$table = new LucidFrame\Console\ConsoleTable();
+$table->setHeaders(['Tentativa', 'Transfer Time', 'Status']);
+
+for ($i = 1; $i <= 15; $i++) {
+    $table->addRow();
+    $table->addColumn($i);
+
+    try {
+        $response = $client->get('/bar', [
+            'on_stats' => static function (TransferStats $stats) use ($table): void {
+                $table->addColumn($stats->getTransferTime() ?? 0);
+            }
+        ]);
+    } catch (RequestException $guzzleException) {
+        $table->addColumn('Hit');
+    }catch (RejectedException $rejectedException) {
+        $table->addColumn(0);
+        $table->addColumn('Rejected');
+    } finally {
+        sleep(1);
+    }
+}
+
+$table->display();
+
